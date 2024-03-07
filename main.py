@@ -1,72 +1,67 @@
-import requests
-from bs4 import BeautifulSoup
-import time
-import schedule
-import sqlite3
-
-URLS = ["https://www.ss.com/lv/transport/cars/bmw/sell/"]
-
-def bot(text):
-    TELEGRAM_TOKEN = "6953171077:AAH3j5jHyHFg_OUDC6wj2ZvRpW9e3n9nY1U"
-    BOT_USERNAME = "@BMW_sscom_bot"
-    CHAT_ID = "-1002071459384"
-    chat_message_text = 'https://api.telegram.org/bot' + TELEGRAM_TOKEN + '/sendMessage?chat_id=' + CHAT_ID + '&text=' + text
-    requests.get(chat_message_text)
+from ss_scraper import cars_data, ssreq
 
 
-def sscomreq(url):
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    table = soup.find("table", align="center")
-    tr_table = table.find_all("tr")
-    cars_table = []
-    for car in tr_table:
-        td = car.find_all('td')
-        cars_table.append(td)
-    clean_car_table = cars_table[1:61]
-
-    behas = []
-    for car in clean_car_table:
-        model = car[3].text
-        year = car[4].text
-        price = car[7].text
-        
-        for link in car:
-            link_end = link.find("a")
-            if link_end:
-                car_url = link_end['href']
-                
-        behas.append((year, model, price[0:-1], str(car_url)))
-
-    conn = sqlite3.connect('behas.db')
-    curs = conn.cursor()
-    data_base_records = []
-    query = """SELECT * FROM cars"""
-    curs.execute(query)
-    records = curs.fetchall()
-    for record in records:
-        data_base_records.append(record)
-
-    for car in behas:
-        if car not in data_base_records:
-            print(f'car {car} not in data base\nAdding.....')
-            curs.execute("INSERT OR IGNORE INTO cars VALUES (?, ?, ?, ?)", car)
-            conn.commit()
-            text = "Jauna beha tirgu!!! " + "www.ss.com/" + str(car[3])
-            bot(text)
-        else:
-            print(f'Beha {car} already in data base')
-    conn.close()
-
-
-def scrape():
+def scrape(brand: str):
+    """Scrapes uour sellected brand car from ss.com"""
+    URLS = [
+        f"https://www.ss.com/lv/transport/cars/{brand}/sell/",
+        f"https://www.ss.com/lv/transport/cars/{brand}/sell/page2.html",
+        f"https://www.ss.com/lv/transport/cars/{brand}/sell/page3.html",
+        f"https://www.ss.com/lv/transport/cars/{brand}/sell/page4.html",
+        f"https://www.ss.com/lv/transport/cars/{brand}/sell/page5.html",
+    ]
+    car_catalogue = []
     for link in URLS:
-        sscomreq(url=link)
+        try:
+            list = ssreq(url=link)
+            element = cars_data(list)
+            car_catalogue.append(element)
+        except ValueError:
+            text = f"'error': 'No cars found for search criteria {brand}.'"
+            print(text)
+    return car_catalogue
 
 
-schedule.every(2).minutes.do(scrape)
+def car_catalog(brand: str):
+    car_cat = scrape(brand)
+    data_base = []
+    data_base2 = []
+    for list in car_cat:
+        for element in list:
+            database_dict = {}
+            database_dict["year"] = int(element[0])
+            database_dict["model"] = element[1]
+            x = element[2].replace(",", ".").replace(" ", "")
+            # x = round(x,3)
+            # x = format(float(x), ".3f")
+            database_dict["price"] = x
+            database_dict["engine"] = element[3]
+            y = element[4].replace(" tūkst.", "000 km")
+            database_dict["milage"] = y
+            database_dict["url"] = "https://ss.com" + str(element[-1])
+            data_base.append(database_dict)
+            year = int(element[0])
+            model = str(element[1])
+            price = element[2].replace(",", "").replace(" ", "")
+            engine_x = element[3].replace("H", "")
+            engine_x = engine_x.replace("D", "")
+            engine_x = engine_x.replace("E", "01.01")
+            engine = float(engine_x)
+            milage = (
+                element[4].replace(" tūkst.", "000").replace(".", "").replace(",", "")
+            )
+            if milage == "-":
+                milage = 0
+            url = element[-1]
+            data_base2.append(
+                (year, str(model), int(price), float(engine), int(milage), url)
+            )
 
-while True:
-    schedule.run_pending()
-    time.sleep(1)
+    return data_base2
+
+
+# schedule.every(3).minutes.do(scrape)
+
+# while True:
+#     schedule.run_pending()
+#     time.sleep(1)
